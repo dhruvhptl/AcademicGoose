@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import dynamic from 'next/dynamic'
 import {
   DndContext,
   DragEndEvent,
@@ -19,6 +20,15 @@ import CourseSearchSidebar from './CourseSearchSidebar'
 import TermCanvas from './TermCanvas'
 import RequirementsSidebar from './RequirementsSidebar'
 
+const ExploreSidebar = dynamic(() => import('./ExploreSidebar'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-[380px] flex-shrink-0 bg-gray-900 border-r border-gray-700 flex items-center justify-center">
+      <span className="text-xs text-gray-500">Loading...</span>
+    </div>
+  ),
+})
+
 // Overlay card for dragging
 function DragOverlayCard({ course }: { course: Course }) {
   return (
@@ -29,9 +39,12 @@ function DragOverlayCard({ course }: { course: Course }) {
   )
 }
 
+type AppMode = 'plan' | 'explore'
+
 export default function PlannerCanvas() {
   const { plan, addCourse, moveCourse } = usePlanStore()
   const [activeCourse, setActiveCourse] = useState<Course | null>(null)
+  const [mode, setMode] = useState<AppMode>('plan')
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -125,10 +138,37 @@ export default function PlannerCanvas() {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex h-full overflow-hidden">
-        <CourseSearchSidebar />
-        <TermCanvas />
-        <RequirementsSidebar />
+      <div className="flex flex-col h-full overflow-hidden">
+        {/* Mode toggle bar */}
+        <div className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 border-b border-gray-800 bg-gray-900">
+          <button
+            onClick={() => setMode('plan')}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+              mode === 'plan'
+                ? 'bg-blue-600 text-white'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+            }`}
+          >
+            Plan
+          </button>
+          <button
+            onClick={() => setMode('explore')}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+              mode === 'explore'
+                ? 'bg-blue-600 text-white'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+            }`}
+          >
+            Explore
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex flex-1 overflow-hidden">
+          {mode === 'plan' ? <CourseSearchSidebar /> : <ExploreSidebar />}
+          <TermCanvas />
+          <RequirementsSidebar />
+        </div>
       </div>
 
       <DragOverlay
