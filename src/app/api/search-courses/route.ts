@@ -1,34 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { uwflowQuery } from '@/lib/uwflow'
+
+interface SearchCoursesResponse {
+  data: {
+    search_courses: Array<{
+      code: string
+      name: string
+      liked: number | null
+      ratings: number | null
+      rating_liked?: number | null
+    }>
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
     const { query } = await req.json()
 
-    const response = await fetch('https://uwflow.com/graphql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({
-        query: `
-          query SearchCourses($query: String!) {
-            search_courses(args: {query: $query}, limit: 20) {
-              code
-              name
-              rating_liked
-            }
-          }
-        `,
-        variables: { query },
-      }),
-    })
+    // UWFlow errors on spaces in course codes (e.g. "cs 341" → error, "cs341" → ok)
+    const normalizedQuery = query.replace(/\s+/g, '')
 
-    if (!response.ok) {
-      throw new Error(`UWFlow responded with ${response.status}`)
+    const data = await uwflowQuery<SearchCoursesResponse>(
+      `query SearchCourses($query: String!, $codeOnly: Boolean!) {
+        search_courses(args: {query: $query, code_only: $codeOnly}, limit: 20) {
+          code
+          name
+          liked
+          ratings
+        }
+      }`,
+      { query: normalizedQuery, codeOnly: false }
+    )
+
+    if (data?.data?.search_courses) {
+      data.data.search_courses = data.data.search_courses
+        .filter((c) => !/xx/i.test(c.code))
+        .map((c) => ({ ...c, rating_liked: c.liked ?? null }))
     }
 
-    const data = await response.json()
     return NextResponse.json(data)
   } catch (error) {
     console.error('Search courses error:', error)

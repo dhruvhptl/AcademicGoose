@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { Plan, Term, PlannedCourse, Course, RequirementGroup, TermType } from '@/types'
+import { Plan, Term, PlannedCourse, Course, RequirementGroup, TermType, CourseStatus } from '@/types'
+import { normalizeCode } from '@/lib/uwflow'
 
 // Hardcoded prereqs
 export const COURSE_PREREQS: Record<string, string[]> = {
@@ -32,11 +33,14 @@ function checkPrereqsSatisfied(
   for (let i = 0; i < termIndex; i++) {
     const term = terms[i]
     if (term.type === 'study') {
-      term.courses.forEach(pc => priorCourseCodes.add(pc.course.code))
+      // failed courses don't count as completed prerequisites
+      term.courses
+        .filter(pc => pc.status !== 'failed')
+        .forEach(pc => priorCourseCodes.add(normalizeCode(pc.course.code)))
     }
   }
 
-  return prereqs.every(prereq => priorCourseCodes.has(prereq))
+  return prereqs.every(prereq => priorCourseCodes.has(normalizeCode(prereq)))
 }
 
 function recomputeAllPrereqs(terms: Term[]): Term[] {
@@ -56,16 +60,19 @@ function computeRequirements(
   groups: RequirementGroup[],
   terms: Term[]
 ): RequirementGroup[] {
-  const allPlannedCodes = new Set<string>()
+  // Only completed-status courses count toward satisfying requirements
+  const completedCodes = new Set<string>()
   terms.forEach(term => {
     if (term.type === 'study') {
-      term.courses.forEach(pc => allPlannedCodes.add(pc.course.code))
+      term.courses
+        .filter(pc => pc.status === 'completed')
+        .forEach(pc => completedCodes.add(normalizeCode(pc.course.code)))
     }
   })
 
   return groups.map(group => ({
     ...group,
-    completed: group.courses.filter(code => allPlannedCodes.has(code)),
+    completed: group.courses.filter(code => completedCodes.has(normalizeCode(code))),
   }))
 }
 
@@ -81,10 +88,10 @@ const SEED_PLAN: Plan = {
       year: 2024,
       type: 'study',
       courses: [
-        { id: 'pc-cs135', course: { code: 'CS 135', name: 'Designing Functional Programs', prereqs: [] }, satisfied: true },
-        { id: 'pc-math135', course: { code: 'MATH 135', name: 'Algebra for Honours Mathematics', prereqs: [] }, satisfied: true },
-        { id: 'pc-math137', course: { code: 'MATH 137', name: 'Calculus 1 for Honours Mathematics', prereqs: [] }, satisfied: true },
-        { id: 'pc-engl109', course: { code: 'ENGL 109', name: 'Introduction to Academic Writing', prereqs: [] }, satisfied: true },
+        { id: 'pc-cs135', course: { code: 'CS 135', name: 'Designing Functional Programs', prereqs: [] }, satisfied: true, status: 'planned' as const },
+        { id: 'pc-math135', course: { code: 'MATH 135', name: 'Algebra for Honours Mathematics', prereqs: [] }, satisfied: true, status: 'planned' as const },
+        { id: 'pc-math137', course: { code: 'MATH 137', name: 'Calculus 1 for Honours Mathematics', prereqs: [] }, satisfied: true, status: 'planned' as const },
+        { id: 'pc-engl109', course: { code: 'ENGL 109', name: 'Introduction to Academic Writing', prereqs: [] }, satisfied: true, status: 'planned' as const },
       ],
     },
     {
@@ -94,10 +101,10 @@ const SEED_PLAN: Plan = {
       year: 2025,
       type: 'study',
       courses: [
-        { id: 'pc-cs136', course: { code: 'CS 136', name: 'Algorithm Design and Data Abstraction', prereqs: ['CS 135'] }, satisfied: true },
-        { id: 'pc-math136', course: { code: 'MATH 136', name: 'Linear Algebra 1 for Honours Mathematics', prereqs: ['MATH 135'] }, satisfied: true },
-        { id: 'pc-math138', course: { code: 'MATH 138', name: 'Calculus 2 for Honours Mathematics', prereqs: ['MATH 137'] }, satisfied: true },
-        { id: 'pc-stat230', course: { code: 'STAT 230', name: 'Probability', prereqs: [] }, satisfied: true },
+        { id: 'pc-cs136', course: { code: 'CS 136', name: 'Algorithm Design and Data Abstraction', prereqs: ['CS 135'] }, satisfied: true, status: 'planned' as const },
+        { id: 'pc-math136', course: { code: 'MATH 136', name: 'Linear Algebra 1 for Honours Mathematics', prereqs: ['MATH 135'] }, satisfied: true, status: 'planned' as const },
+        { id: 'pc-math138', course: { code: 'MATH 138', name: 'Calculus 2 for Honours Mathematics', prereqs: ['MATH 137'] }, satisfied: true, status: 'planned' as const },
+        { id: 'pc-stat230', course: { code: 'STAT 230', name: 'Probability', prereqs: [] }, satisfied: true, status: 'planned' as const },
       ],
     },
     {
@@ -117,9 +124,9 @@ const SEED_PLAN: Plan = {
       year: 2025,
       type: 'study',
       courses: [
-        { id: 'pc-cs241', course: { code: 'CS 241', name: 'Foundations of Sequential Programs', prereqs: ['CS 136'] }, satisfied: true },
-        { id: 'pc-cs245', course: { code: 'CS 245', name: 'Logic and Computation', prereqs: ['CS 135', 'MATH 135'] }, satisfied: true },
-        { id: 'pc-math239', course: { code: 'MATH 239', name: 'Introduction to Combinatorics', prereqs: ['MATH 138', 'MATH 136'] }, satisfied: true },
+        { id: 'pc-cs241', course: { code: 'CS 241', name: 'Foundations of Sequential Programs', prereqs: ['CS 136'] }, satisfied: true, status: 'planned' as const },
+        { id: 'pc-cs245', course: { code: 'CS 245', name: 'Logic and Computation', prereqs: ['CS 135', 'MATH 135'] }, satisfied: true, status: 'planned' as const },
+        { id: 'pc-math239', course: { code: 'MATH 239', name: 'Introduction to Combinatorics', prereqs: ['MATH 138', 'MATH 136'] }, satisfied: true, status: 'planned' as const },
       ],
     },
     {
@@ -183,9 +190,12 @@ interface PlanStore {
   addCourse: (termId: string, course: Course) => void
   removeCourse: (termId: string, courseId: string) => void
   moveCourse: (fromTermId: string, toTermId: string, courseId: string, targetIndex?: number) => void
+  reorderTerms: (fromIndex: number, toIndex: number) => void
   updateRequirements: (groups: RequirementGroup[]) => void
   renameTerm: (termId: string, label: string) => void
   changeTermType: (termId: string, type: TermType) => void
+  setCourseStatus: (termId: string, courseId: string, status: CourseStatus) => void
+  setCurrentTerm: (termId: string) => void
 }
 
 export const usePlanStore = create<PlanStore>()(
@@ -225,6 +235,7 @@ export const usePlanStore = create<PlanStore>()(
             id: `pc-${course.code.replace(' ', '-').toLowerCase()}-${Date.now()}`,
             course: courseWithPrereqs,
             satisfied: false,
+            status: 'planned',
           }
           const newTerms = recomputeAllPrereqs(
             state.plan.terms.map(t =>
@@ -283,6 +294,16 @@ export const usePlanStore = create<PlanStore>()(
           return { plan: { ...state.plan, terms: newTerms, requirementGroups: newReqs } }
         }),
 
+      reorderTerms: (fromIndex, toIndex) =>
+        set(state => {
+          const terms = [...state.plan.terms]
+          const [moved] = terms.splice(fromIndex, 1)
+          terms.splice(toIndex, 0, moved)
+          const newTerms = recomputeAllPrereqs(terms)
+          const newReqs = computeRequirements(state.plan.requirementGroups, newTerms)
+          return { plan: { ...state.plan, terms: newTerms, requirementGroups: newReqs } }
+        }),
+
       updateRequirements: (groups) =>
         set(state => {
           const newReqs = computeRequirements(groups, state.plan.terms)
@@ -306,6 +327,56 @@ export const usePlanStore = create<PlanStore>()(
           )
           const newReqs = computeRequirements(state.plan.requirementGroups, newTerms)
           return { plan: { ...state.plan, terms: newTerms, requirementGroups: newReqs } }
+        }),
+
+      setCourseStatus: (termId, courseId, status) =>
+        set(state => {
+          const newTerms = recomputeAllPrereqs(
+            state.plan.terms.map(t =>
+              t.id === termId
+                ? { ...t, courses: t.courses.map(pc => pc.id === courseId ? { ...pc, status } : pc) }
+                : t
+            )
+          )
+          const newReqs = computeRequirements(state.plan.requirementGroups, newTerms)
+          return { plan: { ...state.plan, terms: newTerms, requirementGroups: newReqs } }
+        }),
+
+      setCurrentTerm: (termId) =>
+        set(state => {
+          const termIndex = state.plan.terms.findIndex(t => t.id === termId)
+          if (termIndex === -1) return state
+          const newTerms = state.plan.terms.map((t, i) => {
+            if (t.type !== 'study') return t
+            if (i < termIndex) {
+              // previous terms: mark all planned/inProgress as completed, leave failed alone
+              return {
+                ...t,
+                courses: t.courses.map(pc =>
+                  pc.status === 'failed' ? pc : { ...pc, status: 'completed' as CourseStatus }
+                ),
+              }
+            }
+            if (i === termIndex) {
+              // current term: mark all non-failed as inProgress
+              return {
+                ...t,
+                courses: t.courses.map(pc =>
+                  pc.status === 'failed' ? pc : { ...pc, status: 'inProgress' as CourseStatus }
+                ),
+              }
+            }
+            // future terms: reset to planned
+            return {
+              ...t,
+              courses: t.courses.map(pc =>
+                pc.status === 'failed' ? pc : { ...pc, status: 'planned' as CourseStatus }
+              ),
+            }
+          })
+          const recomputed = recomputeAllPrereqs(newTerms)
+          const newReqs = computeRequirements(state.plan.requirementGroups, recomputed)
+          return { plan: { ...state.plan, terms: recomputed, requirementGroups: newReqs } }
         }),
     }),
     {

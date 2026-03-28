@@ -1,12 +1,16 @@
 'use client'
 
-import { useState } from 'react'
-import { Term, TermType } from '@/types'
+import { useState, useRef, useEffect } from 'react'
+import { Term, TermType, Season } from '@/types'
 import { useDroppable } from '@dnd-kit/core'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import CourseCard from './CourseCard'
 import { usePlanStore } from '@/store/plan'
-import { MoreHorizontal, Briefcase, BookOpen, Coffee, Pencil, Check } from 'lucide-react'
+import {
+  MoreHorizontal, Briefcase, BookOpen, Coffee, GripVertical, X, Check,
+} from 'lucide-react'
 
 interface TermColumnProps {
   term: Term
@@ -42,103 +46,244 @@ const HEADER_BG: Record<TermType, string> = {
   off: 'bg-slate-500/5',
 }
 
-export default function TermColumn({ term }: TermColumnProps) {
-  const { removeTerm, updateTerm, removeCourse, renameTerm, changeTermType } = usePlanStore()
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [editingLabel, setEditingLabel] = useState(false)
-  const [labelValue, setLabelValue] = useState(term.label)
+const SEASONS: Season[] = ['Fall', 'Winter', 'Spring']
+const YEARS = Array.from({ length: 15 }, (_, i) => 2020 + i)
 
-  const { setNodeRef, isOver } = useDroppable({
-    id: `term-${term.id}`,
-    data: { termId: term.id, type: 'term' },
-  })
+// ── Edit popover ──────────────────────────────────────────────────────────────
 
-  const typeConfig = TYPE_CONFIG[term.type]
-  const borderColor = BORDER_COLOR[term.type]
-  const headerBg = HEADER_BG[term.type]
+interface EditPopoverProps {
+  term: Term
+  onClose: () => void
+}
 
-  const handleLabelSave = () => {
-    if (labelValue.trim()) {
-      renameTerm(term.id, labelValue.trim())
-    } else {
-      setLabelValue(term.label)
+function EditPopover({ term, onClose }: EditPopoverProps) {
+  const { renameTerm, changeTermType, updateTerm, removeTerm } = usePlanStore()
+  const [label, setLabel] = useState(term.label)
+  const [season, setSeason] = useState<Season>(term.season)
+  const [year, setYear] = useState(term.year)
+  const [type, setType] = useState<TermType>(term.type)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
-    setEditingLabel(false)
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  function handleSave() {
+    if (label.trim()) renameTerm(term.id, label.trim())
+    updateTerm(term.id, { season, year })
+    if (type !== term.type) changeTermType(term.id, type)
+    onClose()
   }
 
   return (
     <div
-      className={`flex-shrink-0 w-[200px] flex flex-col rounded-lg border ${borderColor} bg-gray-900 overflow-hidden`}
+      ref={ref}
+      className="absolute right-0 top-8 z-30 bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-3 w-[210px] space-y-3"
+      // Prevent drag-handle mousedown from bleeding through
+      onMouseDown={e => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-gray-200">Edit term</span>
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-300">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* Label */}
+      <div>
+        <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">Label</label>
+        <input
+          autoFocus
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSave()}
+          className="w-full bg-gray-700 text-sm text-gray-100 rounded px-2 py-1 outline-none border border-gray-600 focus:border-blue-500"
+        />
+      </div>
+
+      {/* Type */}
+      <div>
+        <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">Type</label>
+        <div className="flex gap-1">
+          {(['study', 'coop', 'off'] as TermType[]).map(t => (
+            <button
+              key={t}
+              onClick={() => setType(t)}
+              className={`flex-1 py-1 rounded text-[10px] font-medium border transition-colors ${
+                type === t
+                  ? TYPE_CONFIG[t].color
+                  : 'border-gray-600 text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {TYPE_CONFIG[t].label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Season */}
+      <div>
+        <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">Season</label>
+        <select
+          value={season}
+          onChange={e => setSeason(e.target.value as Season)}
+          className="w-full bg-gray-700 text-sm text-gray-100 rounded px-2 py-1 outline-none border border-gray-600 focus:border-blue-500"
+        >
+          {SEASONS.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {/* Year */}
+      <div>
+        <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">Year</label>
+        <select
+          value={year}
+          onChange={e => setYear(Number(e.target.value))}
+          className="w-full bg-gray-700 text-sm text-gray-100 rounded px-2 py-1 outline-none border border-gray-600 focus:border-blue-500"
+        >
+          {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={handleSave}
+          className="flex-1 flex items-center justify-center gap-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded py-1.5 transition-colors"
+        >
+          <Check className="h-3 w-3" /> Save
+        </button>
+        <button
+          onClick={() => { removeTerm(term.id); onClose() }}
+          className="px-2 py-1.5 text-xs text-red-400 hover:bg-gray-700 rounded transition-colors"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Main TermColumn ───────────────────────────────────────────────────────────
+
+export default function TermColumn({ term }: TermColumnProps) {
+  const { changeTermType, removeCourse, updateTerm, setCurrentTerm } = usePlanStore()
+  const [editOpen, setEditOpen] = useState(false)
+  const [currentTermOpen, setCurrentTermOpen] = useState(false)
+  const currentTermRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!currentTermOpen) return
+    function handler(e: MouseEvent) {
+      if (currentTermRef.current && !currentTermRef.current.contains(e.target as Node)) {
+        setCurrentTermOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [currentTermOpen])
+
+  // Sortable — for dragging the whole column to reorder terms
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setSortableRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: `sortable-term-${term.id}`, data: { type: 'term-column' } })
+
+  const sortableStyle = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  }
+
+  // Droppable — for courses dropped into this term
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: `term-${term.id}`,
+    data: { termId: term.id, type: 'term' },
+  })
+
+  return (
+    <div
+      ref={setSortableRef}
+      style={sortableStyle}
+      className={`flex-shrink-0 w-[200px] flex flex-col rounded-lg border ${BORDER_COLOR[term.type]} bg-gray-900 overflow-visible`}
     >
       {/* Header */}
-      <div className={`${headerBg} p-3 border-b ${borderColor}`}>
-        <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0">
-            {editingLabel ? (
-              <div className="flex items-center gap-1">
-                <input
-                  autoFocus
-                  value={labelValue}
-                  onChange={e => setLabelValue(e.target.value)}
-                  onBlur={handleLabelSave}
-                  onKeyDown={e => { if (e.key === 'Enter') handleLabelSave() }}
-                  className="bg-gray-700 text-white text-sm font-semibold rounded px-1 py-0.5 w-full outline-none border border-blue-500"
-                />
-                <button onClick={handleLabelSave} className="text-green-400">
-                  <Check className="h-3 w-3" />
+      <div className={`${HEADER_BG[term.type]} px-2 pt-2 pb-1.5 border-b ${BORDER_COLOR[term.type]} rounded-t-lg`}>
+        {/* Top row: drag handle + label + menu */}
+        <div className="flex items-center gap-1">
+          <button
+            {...attributes}
+            {...listeners}
+            className="text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing flex-shrink-0 touch-none"
+            title="Drag to reorder"
+            // Stop propagation so the popover's onMouseDown doesn't interfere
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <GripVertical className="h-3.5 w-3.5" />
+          </button>
+
+          <div className="flex-1 min-w-0 relative" ref={currentTermRef}>
+            <button
+              onClick={() => term.type === 'study' && setCurrentTermOpen(v => !v)}
+              className={`text-left w-full ${term.type === 'study' ? 'hover:opacity-80' : ''}`}
+              title={term.type === 'study' ? 'Click to set as current term' : undefined}
+            >
+              <div className="font-semibold text-sm text-gray-100 truncate">{term.label}</div>
+              <div className="text-[10px] text-gray-500">{term.season} {term.year}</div>
+            </button>
+            {currentTermOpen && (
+              <div
+                className="absolute left-0 top-full mt-1 z-30 bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-2 w-[172px]"
+                onMouseDown={e => e.stopPropagation()}
+              >
+                <p className="text-[10px] text-gray-400 mb-2 leading-tight">
+                  Mark previous terms as completed, this term as in progress.
+                </p>
+                <button
+                  onClick={() => { setCurrentTerm(term.id); setCurrentTermOpen(false) }}
+                  className="w-full text-xs bg-blue-600 hover:bg-blue-500 text-white rounded py-1.5 transition-colors"
+                >
+                  Set as current term
                 </button>
               </div>
-            ) : (
-              <button
-                onClick={() => setEditingLabel(true)}
-                className="group flex items-center gap-1 text-left"
-              >
-                <span className="font-semibold text-sm text-gray-100">{term.label}</span>
-                <Pencil className="h-2.5 w-2.5 text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </button>
             )}
-            <div className="text-xs text-gray-400 mt-0.5">{term.season} {term.year}</div>
           </div>
 
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <button
-              onClick={() => setMenuOpen(!menuOpen)}
+              onClick={() => setEditOpen(v => !v)}
               className="text-gray-500 hover:text-gray-300 transition-colors p-0.5 rounded"
             >
               <MoreHorizontal className="h-4 w-4" />
             </button>
-
-            {menuOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-6 z-20 bg-gray-800 border border-gray-600 rounded-md shadow-lg py-1 min-w-[140px]">
-                  <div className="px-2 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Change type</div>
-                  {(['study', 'coop', 'off'] as TermType[]).map(t => (
-                    <button
-                      key={t}
-                      onClick={() => { changeTermType(term.id, t); setMenuOpen(false) }}
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-700 transition-colors ${term.type === t ? 'text-blue-400' : 'text-gray-300'}`}
-                    >
-                      {TYPE_CONFIG[t].label}
-                    </button>
-                  ))}
-                  <div className="border-t border-gray-700 mt-1 pt-1">
-                    <button
-                      onClick={() => { removeTerm(term.id); setMenuOpen(false) }}
-                      className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-700 transition-colors"
-                    >
-                      Delete term
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
+            {editOpen && <EditPopover term={term} onClose={() => setEditOpen(false)} />}
           </div>
         </div>
 
-        <div className={`inline-flex items-center gap-1 mt-2 px-1.5 py-0.5 rounded text-[10px] border ${typeConfig.color}`}>
-          {typeConfig.icon}
-          {typeConfig.label}
+        {/* Inline type switcher */}
+        <div className="flex gap-1 mt-2">
+          {(['study', 'coop', 'off'] as TermType[]).map(t => (
+            <button
+              key={t}
+              onClick={() => changeTermType(term.id, t)}
+              className={`flex-1 flex items-center justify-center gap-0.5 py-0.5 rounded text-[9px] font-medium border transition-colors ${
+                term.type === t
+                  ? TYPE_CONFIG[t].color
+                  : 'border-gray-700 text-gray-600 hover:text-gray-400 hover:border-gray-600'
+              }`}
+            >
+              {TYPE_CONFIG[t].icon}
+              {TYPE_CONFIG[t].label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -150,7 +295,7 @@ export default function TermColumn({ term }: TermColumnProps) {
             strategy={verticalListSortingStrategy}
           >
             <div
-              ref={setNodeRef}
+              ref={setDropRef}
               className={`flex-1 min-h-[80px] space-y-1.5 rounded-md transition-colors ${
                 isOver ? 'bg-blue-500/10 ring-1 ring-blue-500/30' : ''
               }`}
@@ -159,6 +304,7 @@ export default function TermColumn({ term }: TermColumnProps) {
                 <CourseCard
                   key={pc.id}
                   plannedCourse={pc}
+                  termId={term.id}
                   onRemove={() => removeCourse(term.id, pc.id)}
                 />
               ))}
@@ -198,15 +344,12 @@ export default function TermColumn({ term }: TermColumnProps) {
         )}
 
         {term.type === 'off' && (
-          <div className="text-xs text-gray-600 text-center py-4">
-            Off term — no courses
-          </div>
+          <div className="text-xs text-gray-600 text-center py-4">Off term — no courses</div>
         )}
       </div>
 
-      {/* Course count for study terms */}
       {term.type === 'study' && term.courses.length > 0 && (
-        <div className="px-3 py-1.5 border-t border-gray-800 text-[10px] text-gray-500">
+        <div className="px-3 py-1.5 border-t border-gray-800 text-[10px] text-gray-500 rounded-b-lg">
           {term.courses.length} course{term.courses.length !== 1 ? 's' : ''}
         </div>
       )}

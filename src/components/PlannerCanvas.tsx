@@ -13,9 +13,8 @@ import {
   closestCenter,
   defaultDropAnimationSideEffects,
 } from '@dnd-kit/core'
-import { usePlanStore } from '@/store/plan'
+import { usePlanStore, COURSE_PREREQS } from '@/store/plan'
 import { Course } from '@/types'
-import { COURSE_PREREQS } from '@/store/plan'
 import CourseSearchSidebar from './CourseSearchSidebar'
 import TermCanvas from './TermCanvas'
 import RequirementsSidebar from './RequirementsSidebar'
@@ -42,7 +41,7 @@ function DragOverlayCard({ course }: { course: Course }) {
 type AppMode = 'plan' | 'explore'
 
 export default function PlannerCanvas() {
-  const { plan, addCourse, moveCourse } = usePlanStore()
+  const { plan, addCourse, moveCourse, reorderTerms } = usePlanStore()
   const [activeCourse, setActiveCourse] = useState<Course | null>(null)
   const [mode, setMode] = useState<AppMode>('plan')
 
@@ -81,6 +80,16 @@ export default function PlannerCanvas() {
 
     const activeId = active.id as string
     const overId = over.id as string
+
+    // Term column reordering
+    if (active.data.current?.type === 'term-column') {
+      const fromIndex = plan.terms.findIndex(t => `sortable-term-${t.id}` === activeId)
+      const toIndex = plan.terms.findIndex(t => `sortable-term-${t.id}` === overId)
+      if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
+        reorderTerms(fromIndex, toIndex)
+      }
+      return
+    }
 
     // Determine target term
     let targetTermId: string | null = null

@@ -1,4 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { uwflowQuery } from '@/lib/uwflow'
+
+interface RawCourse {
+  code: string
+  name: string
+  prereqs?: string | null
+  prerequisites?: Array<{ prerequisite: RawCourse }>
+}
+
+interface CourseQueryResponse {
+  data: { course: RawCourse[] }
+}
+
+// Remap UWFlow's schema to the shape ExploreSidebar expects:
+// prerequisites[].prerequisite → prereqs[].prereq_course
+function remapCourse(c: RawCourse): object {
+  return {
+    code: c.code,
+    name: c.name,
+    prereqsText: c.prereqs ?? null,
+    prereqs: (c.prerequisites ?? []).map(p => ({
+      prereq_course: remapCourse(p.prerequisite),
+    })),
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,57 +33,44 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'code is required' }, { status: 400 })
     }
 
-    const response = await fetch('https://uwflow.com/graphql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({
-        query: `
-          query GetCourse($code: String!) {
-            course(where: {code: {_eq: $code}}) {
+    const data = await uwflowQuery<CourseQueryResponse>(
+      `query GetCourse($code: String!) {
+        course(where: {code: {_eq: $code}}) {
+          code
+          name
+          prereqs
+          prerequisites {
+            prerequisite {
               code
               name
-              rating_liked
-              prereqs: course_prerequisites {
-                prereq_course {
+              prereqs
+              prerequisites {
+                prerequisite {
                   code
                   name
-                  rating_liked
-                  prereqs: course_prerequisites {
-                    prereq_course {
+                  prereqs
+                  prerequisites {
+                    prerequisite {
                       code
                       name
-                      rating_liked
-                      prereqs: course_prerequisites {
-                        prereq_course {
-                          code
-                          name
-                        }
-                      }
+                      prereqs
                     }
                   }
                 }
               }
             }
           }
-        `,
-        variables: { code: code.toLowerCase().replace(/\s+/g, '') },
-      }),
-    })
+        }
+      }`,
+      { code: code.toLowerCase().replace(/\s+/g, '') }
+    )
 
-    if (!response.ok) {
-      throw new Error(`UWFlow responded with ${response.status}`)
-    }
-
-    const data = await response.json()
     const courses = data?.data?.course ?? []
     if (courses.length === 0) {
       return NextResponse.json({ error: 'Course not found' }, { status: 404 })
     }
 
-    return NextResponse.json(courses[0])
+    return NextResponse.json(remapCourse(courses[0]))
   } catch (error) {
     console.error('Course prereqs error:', error)
     return NextResponse.json({ error: 'Failed to fetch course prereqs' }, { status: 500 })
